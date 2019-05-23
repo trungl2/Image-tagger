@@ -11,55 +11,47 @@
 #define NUM_CHAR6_HASHES 20
 #define BYTES_IN_HASH 32
 #define MAX_WORD_LEN 30
-#define MAX_COMMON_PWDS 80000
-#define NUM_ALPHANUMERIC 36
 #define NUM_ALPHA 26
 #define NUM_UPPER_LOWER_ALPHA 52
-#define CHAR_SPAN 94
 #define NUM_HASHED_PWDS 30
 #define ASCII_UPPER_TO_LOWER 6
+#define NUM_DIGITS 10
 
 typedef enum {
 	HASH_4CHARS,
 	HASH_6CHARS
 } HASH_MODE;
 //converts word to byte format
-void convert_to_hash(BYTE *word, BYTE *buffer, HASH_MODE hash_mode) {
+void convert_to_hash(BYTE *word, BYTE *buffer) {
 	
-	int word_len;
-	if(hash_mode == HASH_4CHARS) {
-		word_len = 4;
-	} else {
-		word_len = 6;
-	}
+	char *char_word = (char*)word;
 	
 	SHA256_CTX ctx;
 	
 	sha256_init(&ctx);
-	sha256_update(&ctx, word, word_len);
+	sha256_update(&ctx, word, strlen(char_word));
 	sha256_final(&ctx, buffer);
 	
 }
 
 
 //checks if the guess was in the array of words
-int check_guess(char *guess, BYTE **hashes_arr, HASH_MODE hash_mode, 
-	char **found_words) {
+int check_guess(char *guess, BYTE **hashes_arr, char **found_words) {
+	static int tot_num_guesses = 0;
 	BYTE hashed_guess[SHA256_BLOCK_SIZE];
 	BYTE *guess_byte = (BYTE*)guess;
 	
-	
 	//checks if the word has already been found
-	if(hash_mode == HASH_4CHARS) {
+	if(strlen(guess) == 4) {
 		for(int i=0; i<NUM_CHAR4_HASHES; i++) {
 			if(strcmp(found_words[i], guess) == 0) {
-				return 0;
+				return tot_num_guesses;
 			}
 		}
 	} else {
 		for(int i=NUM_CHAR4_HASHES; i<NUM_CHAR4_HASHES+NUM_CHAR6_HASHES; i++) {
 			if(strcmp(found_words[i], guess) == 0) {
-				return 0;
+				return tot_num_guesses;
 			}
 		}
 	}
@@ -67,7 +59,7 @@ int check_guess(char *guess, BYTE **hashes_arr, HASH_MODE hash_mode,
 	//adjust number of hashes compared and offset of the found words array
 	int num_hashes;
 	int offset;
-	if(hash_mode == HASH_4CHARS) {
+	if(strlen(guess) == 4) {
 		num_hashes = NUM_CHAR4_HASHES;
 		offset = 0;
 	} else {
@@ -77,25 +69,28 @@ int check_guess(char *guess, BYTE **hashes_arr, HASH_MODE hash_mode,
 	
 	//converts the guess to byte, compares it to the hashes
 	//and prints if there is match
-	convert_to_hash(guess_byte, hashed_guess, hash_mode);
+	convert_to_hash(guess_byte, hashed_guess);
 	for(int j=0; j<num_hashes; j++) {
+		tot_num_guesses += 1;
 		if (!memcmp(hashed_guess, hashes_arr[j], SHA256_BLOCK_SIZE)) {
 			strcpy(found_words[offset+j], guess);
 			printf("%s %d\n", guess, j+1);
-			return 1;
+			return tot_num_guesses;
 		}
 	}
-	return 0;
+	return tot_num_guesses;
 }
 
 //does permutation of possible letters to numbers and checks if it the result
 //is in the list of hashes
 void letter_to_sym_permutation(char *str, int start_point, int end_point, 
 	BYTE **hashes_arr, int check_upper, HASH_MODE hash_mode, 
-	char **found_words) {
+	char **found_words, int max_guesses) {
 	char new_str[strlen(str) + 1];
 	
-	check_guess(str, hashes_arr, hash_mode, found_words);
+	if((check_guess(str, hashes_arr, found_words) >= max_guesses) && (max_guesses >= 0)) {
+		exit(EXIT_SUCCESS);
+	}
 	
 	//list of possible substitution for characters
 	int has_changed = 0;
@@ -129,12 +124,11 @@ void letter_to_sym_permutation(char *str, int start_point, int end_point,
 		//repeat but use the next character as the starting point
 		if(has_changed) {
 			letter_to_sym_permutation( new_str,i+1, end_point, hashes_arr, 
-				check_upper, hash_mode, found_words);
+				check_upper, hash_mode, found_words , max_guesses);
 		}
 	}
 }
 
-/*
 void compare_pass_to_hash(char *pwd_file, char *hash_file) {
 	int i;
 	
@@ -142,15 +136,15 @@ void compare_pass_to_hash(char *pwd_file, char *hash_file) {
     //finds number of passwords in the text file
     FILE *fileptr = fopen(pwd_file, "r");
     char word[MAX_WORD_LEN];
-    int n = 0;
+    int num_pwds = 0;
     while(fgets(word, MAX_WORD_LEN, fileptr)!=NULL){
-    	n++;
+    	num_pwds++;
     }
 
     // store all of the passwords and removes new line character
-    char pwd_list[n][MAX_WORD_LEN];
+    char pwd_list[num_pwds][MAX_WORD_LEN];
     rewind(fileptr);
-    for(i=0;i<n;i++){
+    for(i=0;i<num_pwds;i++){
         fgets(word, MAX_WORD_LEN, fileptr);
         word[strlen(word)-1] = '\0';
         strncpy(pwd_list[i], word, strlen(word) + 1);
@@ -161,25 +155,22 @@ void compare_pass_to_hash(char *pwd_file, char *hash_file) {
 	//process hash file
 	char *buffer;
 	long file_len;
-	fileptr = fopen(hash_file, "rb"); // Open the file for reading in binary
-	fseek(fileptr, 0, SEEK_END); //finds start point (0) and end point (end) and places the ptr at the end point
-	file_len = ftell(fileptr); //use the ptr to get the len
-	rewind(fileptr); //puts the pts back to the start
+	fileptr = fopen(hash_file, "rb");
+	fseek(fileptr, 0, SEEK_END);
+	file_len = ftell(fileptr);
+	rewind(fileptr);
 	
 	//stores hashes in the buffer
 	buffer = malloc((file_len) * sizeof(char));
-	fread(buffer, file_len, 1, fileptr);               //third input --> specifies size what we are reading in term of size_t
-	
+	fread(buffer, file_len, 1, fileptr);
 
-	
 	fclose(fileptr);
-	//printf("%ld", file_len);
 	
 	//initialise array to store encoded hexadecimal words
-	int num_hash = file_len/BYTES_IN_HASH; // need to check on this
-	BYTE **hashed_passes = malloc(num_hash * sizeof(*hashed_passes));
-	for(i=0; i<num_hash; i++) {
-		hashed_passes[i] = malloc(BYTES_IN_HASH * sizeof(BYTE)); //maybe leave at 4
+	int num_hashes = file_len/BYTES_IN_HASH;
+	BYTE **hashed_passes = malloc(num_hashes * sizeof(*hashed_passes));
+	for(i=0; i<num_hashes; i++) {
+		hashed_passes[i] = malloc(BYTES_IN_HASH * sizeof(BYTE));
 	}
 	
 
@@ -188,7 +179,6 @@ void compare_pass_to_hash(char *pwd_file, char *hash_file) {
 	int index = 0;
 	for(i=0; i<file_len; i++) {
 		hashed_passes[word_count][index] = buffer[i];
-		//printf("%x ",words4[word_count][index]);
 		index += 1;
 		
 		//reset bytes counted after every 32 bytes (after every word)
@@ -197,29 +187,27 @@ void compare_pass_to_hash(char *pwd_file, char *hash_file) {
 			word_count += 1;
 		}
 	}
-	
-	printf("%x\n%s\n\n\n", hashed_passes[0][0], pwd_list[0]);
-	
-	for(i=0; i<n; i++) {
-		check_guess(pwd_list[i], hashed_passes, );
+
+	//convert the password to hashed form and compares it to the 
+	//hashed passwords
+	BYTE hashed_guess[SHA256_BLOCK_SIZE];
+	BYTE *guess_byte;
+	for(int i=0; i<num_pwds; i++) {
+		guess_byte = (BYTE*)pwd_list[i];
+		convert_to_hash(guess_byte, hashed_guess);
+		for(int j=0; j<num_hashes; j++) {
+			if (!memcmp(hashed_guess, hashed_passes[j], SHA256_BLOCK_SIZE)) {
+				printf("%s %d\n", pwd_list[i], j+1);
+			}
+		}
 	}
-	
-	//free
-	for(i=0; i<num_hash; i++) {
-		free(hashed_passes[i]);
-	}
-	free(hashed_passes);
+	free(buffer);
 	
 }
-*/
-
-
-
-
 
 //makes a guess to the guess using a file and variations of the guess
 void guess_with_file(char *search_file, BYTE **hashes, HASH_MODE hash_mode, 
-	char **found_words) {
+	char **found_words, int max_guesses) {
 
     //finds number of words in the search file
     int i;
@@ -273,7 +261,7 @@ void guess_with_file(char *search_file, BYTE **hashes, HASH_MODE hash_mode,
 			}
 			
 			letter_to_sym_permutation(guess, 0, strlen(guess), hashes, 1, 
-				hash_mode, found_words);
+				hash_mode, found_words, max_guesses);
 			
 			//try variations in cases of the words
 			//case 1: first character to upper
@@ -281,7 +269,7 @@ void guess_with_file(char *search_file, BYTE **hashes, HASH_MODE hash_mode,
 				toupper(searched_words[i][0]))) {
 				guess[0] = toupper(searched_words[i][0]);
 				letter_to_sym_permutation(guess, 0, strlen(guess), hashes, 1,
-					hash_mode, found_words);
+					hash_mode, found_words, max_guesses);
 			}
 
 			//case 2: all characters to upper
@@ -291,14 +279,14 @@ void guess_with_file(char *search_file, BYTE **hashes, HASH_MODE hash_mode,
 				}
 			}
 			letter_to_sym_permutation(guess, 0, strlen(guess), hashes, 1, 
-				hash_mode, found_words);
+				hash_mode, found_words, max_guesses);
 		}
 	}
 }
 
 
 void brute_force_lowercase_alpha(BYTE **hashes, HASH_MODE hash_mode, 
-	char **found_words) {
+	char **found_words, int max_guesses) {
 	
 	//adjust length of string based on the hash that we have 
 	//and number of hashes
@@ -308,7 +296,7 @@ void brute_force_lowercase_alpha(BYTE **hashes, HASH_MODE hash_mode,
 	int char6_loop;
 	if(hash_mode == HASH_4CHARS) {
 		guess = &guess_template4[0];
-		char6_loop = 25;
+		char6_loop = NUM_ALPHA-1;
 	} else {
 		guess = &guess_template6[0];
 		char6_loop = 0;
@@ -334,21 +322,21 @@ void brute_force_lowercase_alpha(BYTE **hashes, HASH_MODE hash_mode,
 							//checks if guess and its symbol variations 
 							//are correct
 							letter_to_sym_permutation(guess, 0, strlen(guess), 
-								hashes, 1, hash_mode, found_words);
+								hashes, 1, hash_mode, found_words, max_guesses);
 							
 							//try variations of the word 
 							//case 1: first character to upper
 							guess[0] = toupper(guess[0]);
 							//printf("%s ", char4_guess);
 							letter_to_sym_permutation(guess, 0, strlen(guess), 
-								hashes, 1, hash_mode, found_words);
+								hashes, 1, hash_mode, found_words, max_guesses);
 					
 							//case 2: all characters to upper
 							for (int m=1; m<strlen(guess); m++) {
 								guess[m] = toupper(guess[m]);
 							}
 							letter_to_sym_permutation(guess, 0, strlen(guess), 
-								hashes, 1, hash_mode, found_words);
+								hashes, 1, hash_mode, found_words, max_guesses);
 						}
 					}
 				}
@@ -366,7 +354,7 @@ void adjust_upper_to_lower(char *guess, int position, int i) {
 }
 
 void brute_force_mix_alpha(BYTE **hashes, HASH_MODE hash_mode, 
-	char **found_words) {
+	char **found_words, int max_guesses) {
 	//adjust length of string based on the hash that we have 
 	//and number of hashes
 	char guess_template4[] = "    ";
@@ -375,7 +363,7 @@ void brute_force_mix_alpha(BYTE **hashes, HASH_MODE hash_mode,
 	int char6_loop;
 	if(hash_mode == HASH_4CHARS) {
 		guess = &guess_template4[0];
-		char6_loop = 51;
+		char6_loop = NUM_UPPER_LOWER_ALPHA-1;
 	} else {
 		guess = &guess_template6[0];
 		char6_loop = 0;
@@ -406,7 +394,47 @@ void brute_force_mix_alpha(BYTE **hashes, HASH_MODE hash_mode,
 							//checks if guess and its symbol variations 
 							//are correct
 							letter_to_sym_permutation(guess, 0, strlen(guess), 
-								hashes, 0, hash_mode, found_words);
+								hashes, 0, hash_mode, found_words, max_guesses);
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+void brute_force_numbers(BYTE **hashes, HASH_MODE hash_mode, 
+	char **found_words, int max_guesses) {
+	char guess_template4[] = "    ";
+	char guess_template6[] = "      ";
+	char *guess;
+	int char6_loop;
+	if(hash_mode == HASH_4CHARS) {
+		guess = &guess_template4[0];
+		char6_loop = NUM_DIGITS-1;
+	} else {
+		guess = &guess_template6[0];
+		char6_loop = 0;
+	}
+	for(int i=0; i<NUM_DIGITS; i++) {
+		for(int j=0; j<NUM_DIGITS; j++) {
+			for(int k=0; k<NUM_DIGITS; k++) {
+				for(int p=0; p<NUM_DIGITS; p++) {
+					for(int a=char6_loop; a<NUM_DIGITS; a++) {
+						for(int b=char6_loop; b<NUM_DIGITS; b++) {
+							//adds the character to the guess
+							guess[0] = '0' + i;
+							guess[1] = '0' + j;
+							guess[2] = '0' + k;
+							guess[3] = '0' + p;
+							if(hash_mode == HASH_6CHARS) {
+								guess[4] = '0' + a;
+								guess[5] = '0' + b;
+							}
+							if((check_guess(guess, hashes, found_words) > max_guesses) && (max_guesses >= 0)) {
+								printf("yay");
+								exit(EXIT_SUCCESS);
+							}
 						}
 					}
 				}
@@ -461,14 +489,15 @@ BYTE **read_hash_file(char *hash_file, int num_hashes) {
 }
 
 int main(int argc, char* argv[]) {
+	int max_guesses = -1;
+	if(argc == 2) {
+		max_guesses = atoi(argv[1]);
+	}
 	
-	/*
-	//action when there are 2 arguments
 	if(argc == 3) {
 		compare_pass_to_hash(argv[1], argv[2]);
 		return 0;
 	}
-	*/
 	
 	//reads the files containg the hash of the passwords
 	BYTE **char4_hashes = read_hash_file("pwd4sha256", NUM_CHAR4_HASHES);
@@ -486,18 +515,19 @@ int main(int argc, char* argv[]) {
 	
 	//makes guesses on hashed 4 character passwords
     guess_with_file("common_passwords.txt", char4_hashes, HASH_4CHARS, 
-    	found_words);
-    guess_with_file("dict4words.txt",char4_hashes, HASH_4CHARS, found_words); 
-    brute_force_lowercase_alpha(char4_hashes, HASH_4CHARS, found_words);
-    brute_force_mix_alpha(char4_hashes, HASH_4CHARS, found_words);
+    	found_words, max_guesses);
+    guess_with_file("dict4words.txt",char4_hashes, HASH_4CHARS, found_words, max_guesses);
+    brute_force_lowercase_alpha(char4_hashes, HASH_4CHARS, found_words, max_guesses);
+    brute_force_numbers(char4_hashes, HASH_4CHARS, found_words, max_guesses);
+    brute_force_mix_alpha(char4_hashes, HASH_4CHARS, found_words, max_guesses);
     
     //makes guesses on hashed 6 character passwords
     guess_with_file("common_passwords.txt", char6_hashes, HASH_6CHARS, 
-    	found_words);
-    guess_with_file("dict6words.txt",char6_hashes, HASH_6CHARS, found_words); 
-    brute_force_lowercase_alpha(char6_hashes, HASH_6CHARS, found_words);
-    brute_force_mix_alpha(char6_hashes, HASH_6CHARS, found_words);
-    
+    	found_words, max_guesses);
+    guess_with_file("dict6words.txt",char6_hashes, HASH_6CHARS, found_words, max_guesses);
+    brute_force_numbers(char6_hashes, HASH_6CHARS, found_words, max_guesses);
+    brute_force_lowercase_alpha(char6_hashes, HASH_6CHARS, found_words, max_guesses);
+    brute_force_mix_alpha(char6_hashes, HASH_6CHARS, found_words, max_guesses);
 	return 0;
 }
 
