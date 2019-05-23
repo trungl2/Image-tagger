@@ -3,227 +3,403 @@
 #include <string.h>
 #include <memory.h>
 #include <ctype.h>
+#include <math.h>
 
 #include "sha256.h"
 
-#define NUM_WORDS4 10
-#define WORD_BYTES 32
+#define NUM_CHAR4_HASHES 10
+#define NUM_CHAR6_HASHES 20
+#define BYTES_IN_HASH 32
 #define MAX_WORD_LEN 30
 #define MAX_COMMON_PWDS 80000
 #define NUM_ALPHANUMERIC 36 //maybe 35 because a-z = 0-25
 #define CHAR_SPAN 94
+#define NUM_HASHED_PWDS 30
+#define ASCII_UPPER_TO_LOWER 6
 
 //converts word to byte format --> method type and return type might be wrong
 void convert_to_hash(BYTE *word, BYTE *buffer) { //maybe return BYTE
-	//BYTE text1[] = {"abc"};
-	//BYTE buffer[SHA256_BLOCK_SIZE];
 	SHA256_CTX ctx;
 	
 	sha256_init(&ctx);
 	sha256_update(&ctx, word, 4); //NEED TO ADJUST FOR SECOND PART
 	sha256_final(&ctx, buffer);
 	
-	 
-	 //const unsigned char *p1 = buf[0];
-	 //printf("%u", p1);
-	 
-	 //return *buffer;
-	 
 }
 
-
-//not same as word from above, more like encoded word
-int compare_bytes(BYTE *word1, BYTE *word2) {
-	//printf("\nword 1: %x" ,(unsigned char)word1[1]);
-	//printf("    word 2: %x" ,(unsigned char)word2[1]);
-	return !memcmp(word1, word2, SHA256_BLOCK_SIZE); //returns 0 if they are the same
-}
 
 //checks if the guess was in the array of words GET RID OF 4's LATER
-int check_guess(char *guess, BYTE **words4) {
+int check_guess(char *guess, BYTE **hashes_arr) {
 	BYTE hashed_guess[SHA256_BLOCK_SIZE];
-	BYTE *guess_4char_byte = (BYTE*)guess;
-	convert_to_hash(guess_4char_byte, hashed_guess);
+	BYTE *guess_byte = (BYTE*)guess;
+	convert_to_hash(guess_byte, hashed_guess);
 	
+	//printf("%s ", guess);
 	for(int j=0; j<10; j++) {
-		if (compare_bytes(hashed_guess, words4[j])) {
-			printf("%s\n", guess);
+		if (!memcmp(hashed_guess, hashes_arr[j], SHA256_BLOCK_SIZE)) { //memcmp returns 0 if they are the same
+			printf("\n%d: %s\n", j, guess);
 			return 1;
 		}
 	}
 	return 0;
 }
 
-void letter_to_num_permutation(char *str, int start_point, int end_point, BYTE **words4) {
+//does permutation of possible letters to numbers and checks if it the result
+//is in the list of hashes
+// MAKE A MODE SUCH THAT FOR WHEN STR IS A MIX OF CAPS AND NON-CAPS, ONLY NONCAPS ON TURNED INTO NUMBERS
+void letter_to_num_permutation(char *str, int start_point, int end_point, BYTE **hashes_arr, int check_upper) {
 	char new_str[strlen(str) + 1];
-	check_guess(str, words4);
+	check_guess(str, hashes_arr);
 	
 	int has_changed = 0;
 	
 	for(int i=start_point; i<end_point; i++) {
-		if(str[i] == 'e' || str[i] == 'E') {
+		if(str[i] == 'e' || (str[i] == 'E' && check_upper)) {
 			strcpy(new_str, str);
 			new_str[i] = '3';
 			has_changed = 1;
-		} else if(str[i] == 'o' || str[i] == 'O') {
+		} else if(str[i] == 'o' || (str[i] == 'O' && check_upper)) {
 			strcpy(new_str, str);
 			new_str[i] = '0';
 			has_changed = 1;
-		} else if(str[i] == 'r' || str[i] == 'R') {
+		} else if(str[i] == 'r' || (str[i] == 'R' && check_upper)) {
 			strcpy(new_str, str);
 			new_str[i] = '2';
 			has_changed = 1;
-		} else if(str[i] == 'a' || str[i] == 'A') {
+		} else if(str[i] == 'a' || (str[i] == 'A' && check_upper)) {
 			strcpy(new_str, str);
 			new_str[i] = '4';
 			has_changed = 1;
-		} else if(str[i] == 'l' || str[i] == 'L') {
+		} else if(str[i] == 'l' || (str[i] == 'L' && check_upper)) {
 			strcpy(new_str, str);
 			new_str[i] = '1';
+			has_changed = 1;
+		} else if(str[i] == 's' || (str[i] == 'S'&& check_upper)) {
+			strcpy(new_str, str);
+			new_str[i] = '$';
 			has_changed = 1;
 		}
 		
 		if(has_changed) {
-			letter_to_num_permutation( new_str,i+1, end_point, words4);
+			letter_to_num_permutation( new_str,i+1, end_point, hashes_arr, check_upper);
+		}
+	}
+}
+
+
+void compare_pass_to_hash(char *pwd_file, char *hash_file) {
+	int i;
+	
+	//process list of password file
+    //finds number of passwords in the text file
+    FILE *fileptr = fopen(pwd_file, "r");
+    char word[MAX_WORD_LEN];
+    int n = 0;
+    while(fgets(word, MAX_WORD_LEN, fileptr)!=NULL){
+    	n++;
+    }
+
+    // store all of the passwords and removes new line character
+    char pwd_list[n][MAX_WORD_LEN];
+    rewind(fileptr);
+    for(i=0;i<n;i++){
+        fgets(word, MAX_WORD_LEN, fileptr);
+        word[strlen(word)-1] = '\0';
+        strncpy(pwd_list[i], word, strlen(word) + 1);
+        
+    }
+	fclose(fileptr);
+	
+	//process hash file
+	char *buffer;
+	long file_len;
+	fileptr = fopen(hash_file, "rb"); // Open the file for reading in binary
+	fseek(fileptr, 0, SEEK_END); //finds start point (0) and end point (end) and places the ptr at the end point
+	file_len = ftell(fileptr); //use the ptr to get the len
+	rewind(fileptr); //puts the pts back to the start
+	
+	//stores hashes in the buffer
+	buffer = malloc((file_len) * sizeof(char));
+	fread(buffer, file_len, 1, fileptr);               //third input --> specifies size what we are reading in term of size_t
+	
+
+	
+	fclose(fileptr);
+	//printf("%ld", file_len);
+	
+	//initialise array to store encoded hexadecimal words
+	int num_hash = file_len/BYTES_IN_HASH; // need to check on this
+	BYTE **hashed_passes = malloc(num_hash * sizeof(*hashed_passes));
+	for(i=0; i<num_hash; i++) {
+		hashed_passes[i] = malloc(BYTES_IN_HASH * sizeof(BYTE)); //maybe leave at 4
+	}
+	
+
+	//put the encoded hexadecimals into the array seperated by words
+	int word_count = 0;
+	int index = 0;
+	for(i=0; i<file_len; i++) {
+		hashed_passes[word_count][index] = buffer[i];
+		//printf("%x ",words4[word_count][index]);
+		index += 1;
+		
+		//reset bytes counted after every 32 bytes (after every word)
+		if (index == BYTES_IN_HASH) {
+			index = 0;
+			word_count += 1;
+		}
+	}
+	
+	printf("%x\n%s\n\n\n", hashed_passes[0][0], pwd_list[0]);
+	
+	for(i=0; i<n; i++) {
+		check_guess(pwd_list[i], hashed_passes);
+	}
+	
+	
+}
+
+
+
+
+
+
+void guess_with_file(char *search_file, BYTE **hashes) {
+    //finds number of words in the search file
+    int i;
+    FILE *fileptr = fopen(search_file, "r");
+    char word[MAX_WORD_LEN];
+    int num_words = 0;
+    while(fgets(word, MAX_WORD_LEN, fileptr)!=NULL){
+    	num_words++;
+    }
+
+    // store all of the searched words and removes new line character
+    char searched_words[num_words][MAX_WORD_LEN];
+    rewind(fileptr);
+    for(i=0;i<num_words;i++){
+        fgets(word, MAX_WORD_LEN, fileptr);
+        word[strlen(word)-1] = '\0';
+        strncpy(searched_words[i], word, strlen(word) + 1);
+        
+    }
+
+	fclose(fileptr);
+
+	//strategy 1: use all 4 character words to guess
+	char char4_guess_template[] = "    ";
+	char *char4_guess = &char4_guess_template[0];
+	for(i=0; i<num_words; i++) {
+		if (strlen(searched_words[i]) == 4) {
+			
+			//guess using the password from the searched file
+			char4_guess[0] = searched_words[i][0];
+			char4_guess[1] = searched_words[i][1];
+			char4_guess[2] = searched_words[i][2];
+			char4_guess[3] = searched_words[i][3];
+			letter_to_num_permutation(char4_guess, 0, strlen(char4_guess), hashes, 1);
+			
+			//try variations of the word 
+			//case 1: first character to upper
+			if(isalpha(searched_words[i][0]) && (char4_guess[0] != toupper(searched_words[i][0]))) {
+				char4_guess[0] = toupper(searched_words[i][0]);
+				letter_to_num_permutation(char4_guess, 0, strlen(char4_guess), hashes, 1);
+			}
+
+			//case 2: all characters to upper
+			for(int k=0; k<4; k++) {
+				if(isalpha(searched_words[i][k])) {
+					char4_guess[k] = toupper(searched_words[i][k]);
+				}
+			}
+			letter_to_num_permutation(char4_guess, 0, strlen(char4_guess), hashes, 1);
+		}
+	}
+}
+
+void brute_force_lowercase_alpha(BYTE **hashes) {
+	//strategy 1: use all 4 character words to guess
+	char char4_guess_template[] = "    ";
+	char *char4_guess = &char4_guess_template[0];
+	for(int i=0; i<26; i++) {
+		for(int j=0; j<26; j++) {
+			for(int k=0; k<26; k++) {
+				for(int p=0; p<26; p++) {
+					//guess using the password from the searched file
+					//printf("///");
+					
+					
+					char4_guess[0] = 'a' + i;
+					char4_guess[1] = 'a' + j;
+					char4_guess[2] = 'a' + k;
+					char4_guess[3] = 'a' + p;
+					
+					letter_to_num_permutation(char4_guess, 0, strlen(char4_guess), hashes, 1);
+					
+					//try variations of the word 
+					//case 1: first character to upper
+					char4_guess[0] = toupper(char4_guess[0]);
+					//printf("%s ", char4_guess);
+					letter_to_num_permutation(char4_guess, 0, strlen(char4_guess), hashes, 1);
+			
+					//case 2: all characters to upper
+					for (int m=1; m<4; m++) {
+						char4_guess[m] = toupper(char4_guess[m]);
+					}
+					letter_to_num_permutation(char4_guess, 0, strlen(char4_guess), hashes, 1);
+					
+					//case 3: permutation of characters to uppercase WOULD NEED A ISALPHA CHECK HERE IN OTHER CASES
+					//change all characters back to lowercase
+					for (int m=0; m<4; m++) {
+						char4_guess[m] = tolower(char4_guess[m]);
+					}
+					
+				}
+			}
+		}
+	}
+}
+
+
+void brute_force_mix_alpha(BYTE **hashes) {
+	//strategy 1: use all 4 character words to guess
+	char char4_guess_template[] = "    ";
+	char *char4_guess = &char4_guess_template[0];
+	for(int i=0; i<52; i++) {
+		for(int j=0; j<52; j++) {
+			for(int k=0; k<52; k++) {
+				for(int p=0; p<52; p++) {
+					//guess using the password from the searched file
+					//printf("///");
+					
+					//skip over parts that are all lower case, we've already looked through that
+					if(i>=26 && j>=26 && k>=26 && p>=26) {
+						continue;
+					}
+					
+					if(i<26) {
+						char4_guess[0] = 'A' + i;
+					} else {
+						char4_guess[0] = 'A' + i + ASCII_UPPER_TO_LOWER;
+					}
+					
+					if(j<26) {
+						char4_guess[1] = 'A' + j;
+					} else {
+						char4_guess[1] = 'A' + j + ASCII_UPPER_TO_LOWER;
+					}
+					if(k<26) {
+						char4_guess[2] = 'A' + k;
+					} else {
+						char4_guess[2] = 'A' + k + ASCII_UPPER_TO_LOWER;
+					}
+					
+					if(p<26) {
+						char4_guess[3] = 'A' + p;
+					} else {
+						char4_guess[3] = 'A' + p + ASCII_UPPER_TO_LOWER;
+					}
+					
+					//printf("%s ", char4_guess);
+					
+					letter_to_num_permutation(char4_guess, 0, strlen(char4_guess), hashes, 0);
+				}
+			}
 		}
 	}
 }
 
 int main(int argc, char* argv[]) {
+	
+	//action when there are 2 arguments
+	if(argc == 3) {
+		compare_pass_to_hash(argv[1], argv[2]);
+		return 0;
+	}
+	
 	int i;
 	FILE *fileptr;
 	char *buffer;
 	long file_len;
 	 
-	fileptr = fopen("pwd4sha256", "rb"); // Open the file for reading in binary
-	fseek(fileptr, 0, SEEK_END); //finds start point (0) and end point (end) and places the ptr at the end point
-	file_len = ftell(fileptr); //use the ptr to get the len
-	rewind(fileptr); //puts the pts back to the start
+	//processes the 4 character hash file
+	fileptr = fopen("pwd4sha256", "rb"); 	// Open the file for reading in binary
+	fseek(fileptr, 0, SEEK_END); 			//finds start point (0) and end point (end) and places the ptr at the end point
+	file_len = ftell(fileptr); 				//use the ptr to get the len
+	rewind(fileptr); 						//puts the pts back to the start
 	
+	//stores hashes in the buffer
 	buffer = malloc((file_len) * sizeof(char));
-
-	 
-	//third input --> specifies size what we are reading in term of size_t
-	//eg if we reading an array of doubles, then since double = 8 in size_t
-	//(or by using size_of),
 	fread(buffer, file_len, 1, fileptr);
-	
-
 	
 	fclose(fileptr);
 	printf("%ld", file_len);
 	
 	//initialise array to store encoded hexadecimal words
-	BYTE **words4 = malloc(NUM_WORDS4 * sizeof(*words4));
-	for(i=0; i<NUM_WORDS4; i++) {
-		words4[i] = malloc(4 * sizeof(BYTE)); //maybe not +1 since dont need null byte in array of chars
+	BYTE **char4_hashes = malloc(NUM_CHAR4_HASHES * sizeof(*char4_hashes));
+	for(i=0; i<NUM_CHAR4_HASHES; i++) {
+		char4_hashes[i] = malloc(BYTES_IN_HASH * sizeof(BYTE));
 	}
 	
-
-	//put encoded hexadecimal words into the array
+	//put the encoded hexadecimals into the array seperated by words
 	int word_count = 0;
 	int index = 0;
-
 	for(i=0; i<file_len; i++) {
-		words4[word_count][index] = buffer[i];
-		
+		char4_hashes[word_count][index] = buffer[i];
 		//printf("%x ",words4[word_count][index]);
 		index += 1;
 		
-		//reset bytes counted after every 32 bytes or after every word
-		if (index == WORD_BYTES) {
+		//reset bytes counted after every 32 bytes (after every word)
+		if (index == BYTES_IN_HASH) {
 			index = 0;
 			word_count += 1;
 		}
 		
 	}
 	
-
-	
-	printf("\n//////////////////////////////yay\n");
-	
-	printf("yay");
-
-    
-    //finds number of common passwords in the text file
-    fileptr = fopen("common_passwords.txt", "r");
-    char word[MAX_WORD_LEN];
-    int n = 0;
-    while(fgets(word, MAX_WORD_LEN, fileptr)!=NULL){
-    	n++;
-    }
-    
-    printf("yay");
-
-    // store all of the common passwords and removes new line character
-    char common_pwds[n][MAX_WORD_LEN];
-    rewind(fileptr);
-    for(i=0;i<n;i++){
-        fgets(word, MAX_WORD_LEN, fileptr);
-        word[strlen(word)-1] = '\0';
-        strncpy(common_pwds[i], word, strlen(word) + 1);
-        
-    }
-    
-	printf("%s\n", common_pwds[n-2]);
-	printf("%s\n", common_pwds[0]);
-	fclose(fileptr);
-	
-	
-	
-	//init_4char[] = "    ";
-	//char* guess_4char = &init_4char[0];
-	
-	
-	//strategy 1: use all 4 character common passwords to guess
-	printf("//////////////////////////////\n");
-	char common_pwd[] = "    ";
-	char *guess_4char = &common_pwd[0];
-	for(i=0; i<n; i++) {
-		if (strlen(common_pwds[i]) == 4) {
-			
-			//guess the password in the common passwords
-			guess_4char[0] = common_pwds[i][0];
-			guess_4char[1] = common_pwds[i][1];
-			guess_4char[2] = common_pwds[i][2];
-			guess_4char[3] = common_pwds[i][3];
-			//check_guess(guess_4char, words4); --> this is now done in first iteration of letter_to_num_permutation
-			letter_to_num_permutation(guess_4char, 0, strlen(guess_4char), words4);
-			
-			//try variations of the word (caps, changing words to numbers or numbers to words)
-			//case 1: first character to upper
-			if(isalpha(common_pwds[i][0])) {
-				guess_4char[0] = toupper(common_pwds[i][0]);
-			}
-			//check_guess(guess_4char, words4);
-			letter_to_num_permutation(guess_4char, 0, strlen(guess_4char), words4);
-
-			
-			//case 2: all characters to upper
-			for(int k=0; k<4; k++) {
-				if(isalpha(common_pwds[i][k])) {
-					guess_4char[k] = toupper(common_pwds[i][k]);
-				}
-			}
-			if(isalpha(common_pwds[i][0])) {
-				guess_4char[0] = toupper(common_pwds[i][0]);
-			}
-			//check_guess(guess_4char, words4);
-			letter_to_num_permutation(guess_4char, 0, strlen(guess_4char), words4);
-		}
-		
-		
+	/*
+	char **found_words = malloc((NUM_CHAR4_HASHES + NUM_CHAR6_HASHES) * sizeof(*founds_words));
+	for(int i=0; i<NUM_CHAR4_HASHES; i++) {
+		*found_words = malloc((4+1) * sizeof(char));
 	}
+	for(int i=10; i<10 + NUM_CHAR6_HASHES; i++) {
+		*found_words = malloc((6+1) * sizeof(char));
+	}
+	*/
 	
-	
+	printf("\n//////////////////////////////\n");
+    //guess_with_file("common_passwords.txt", char4_hashes);
+    //guess_with_file("dict4words.txt",char4_hashes); 
+    //brute_force_lowercase_alpha(char4_hashes);
+    brute_force_mix_alpha(char4_hashes);
+    
+    
+    
+    
+    
+    
+    
+    
 	//free
+	//dont free this because already freed in buffer?
+	/*
 	for (i=0; i<NUM_WORDS4; i++) {
 		free(words4[i]);
 	}
 	free(words4);
+	*/
 	free(buffer);
 
 	
 	return 0;
 }
+
+
+	
+
+	//strategy 2: use 4 character dictionary to guess
+	
+	
+	
+	
 
