@@ -1,3 +1,10 @@
+/*
+** program designed to guess sha256 hashed words from a file and prints
+** words that were found
+** 24/5/2019
+** by Trung Lai <trungl2@student.unimelb.edu.au>
+*/
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,28 +22,30 @@
 #define NUM_UPPER_LOWER_ALPHA 52
 #define NUM_HASHED_PWDS 30
 #define ASCII_UPPER_TO_LOWER 6
+#define ASCII_NUM_TO_LOWER 39
 #define NUM_DIGITS 10
+#define NUM_ALPHANUMERC 36
 
 typedef enum {
 	HASH_4CHARS,
 	HASH_6CHARS
 } HASH_MODE;
+
 //converts word to byte format
 void convert_to_hash(BYTE *word, BYTE *buffer) {
 	
 	char *char_word = (char*)word;
 	
 	SHA256_CTX ctx;
-	
 	sha256_init(&ctx);
 	sha256_update(&ctx, word, strlen(char_word));
 	sha256_final(&ctx, buffer);
 	
 }
 
-
 //checks if the guess was in the array of words
-int check_guess(char *guess, BYTE **hashes_arr, char **found_words) {
+int check_guess(char *guess, BYTE **hashes_arr, char **found_words, 
+	int max_guesses) {
 	static int tot_num_guesses = 0;
 	BYTE hashed_guess[SHA256_BLOCK_SIZE];
 	BYTE *guess_byte = (BYTE*)guess;
@@ -74,23 +83,34 @@ int check_guess(char *guess, BYTE **hashes_arr, char **found_words) {
 		tot_num_guesses += 1;
 		if (!memcmp(hashed_guess, hashes_arr[j], SHA256_BLOCK_SIZE)) {
 			strcpy(found_words[offset+j], guess);
-			printf("%s %d\n", guess, j+1);
+			
+			//printing method depending if a maximum guesses exists
+			if (max_guesses <= -1) {
+				printf("%s %d\n", guess, j+1+offset);
+			} else {
+				fprintf( stdout, "%s\n", guess);
+			}
+			
 			return tot_num_guesses;
 		}
+		
+		//ends program once reached the maximum number of guesses
+		if((max_guesses >=0) && (tot_num_guesses >= max_guesses)) {
+			exit(EXIT_SUCCESS);
+		}
+		
 	}
 	return tot_num_guesses;
 }
 
-//does permutation of possible letters to numbers and checks if it the result
+//permutation of possible letters to numbers and checks if it the result
 //is in the list of hashes
 void letter_to_sym_permutation(char *str, int start_point, int end_point, 
 	BYTE **hashes_arr, int check_upper, HASH_MODE hash_mode, 
 	char **found_words, int max_guesses) {
 	char new_str[strlen(str) + 1];
 	
-	if((check_guess(str, hashes_arr, found_words) >= max_guesses) && (max_guesses >= 0)) {
-		exit(EXIT_SUCCESS);
-	}
+	check_guess(str, hashes_arr, found_words, max_guesses);
 	
 	//list of possible substitution for characters
 	int has_changed = 0;
@@ -132,7 +152,6 @@ void letter_to_sym_permutation(char *str, int start_point, int end_point,
 void compare_pass_to_hash(char *pwd_file, char *hash_file) {
 	int i;
 	
-	//process list of password file
     //finds number of passwords in the text file
     FILE *fileptr = fopen(pwd_file, "r");
     char word[MAX_WORD_LEN];
@@ -152,7 +171,7 @@ void compare_pass_to_hash(char *pwd_file, char *hash_file) {
     }
 	fclose(fileptr);
 	
-	//process hash file
+	//gets information from the hash file
 	char *buffer;
 	long file_len;
 	fileptr = fopen(hash_file, "rb");
@@ -205,7 +224,7 @@ void compare_pass_to_hash(char *pwd_file, char *hash_file) {
 	
 }
 
-//makes a guess to the guess using a file and variations of the guess
+//makes a guess to the hashed password using a file and variations of the guess
 void guess_with_file(char *search_file, BYTE **hashes, HASH_MODE hash_mode, 
 	char **found_words, int max_guesses) {
 
@@ -327,7 +346,6 @@ void brute_force_lowercase_alpha(BYTE **hashes, HASH_MODE hash_mode,
 							//try variations of the word 
 							//case 1: first character to upper
 							guess[0] = toupper(guess[0]);
-							//printf("%s ", char4_guess);
 							letter_to_sym_permutation(guess, 0, strlen(guess), 
 								hashes, 1, hash_mode, found_words, max_guesses);
 					
@@ -345,6 +363,7 @@ void brute_force_lowercase_alpha(BYTE **hashes, HASH_MODE hash_mode,
 	}
 }
 
+//transitions the character being changed from upper case to lower case
 void adjust_upper_to_lower(char *guess, int position, int i) {
 	if (i<NUM_ALPHA) {
 		guess[position] = 'A' + i;
@@ -353,6 +372,8 @@ void adjust_upper_to_lower(char *guess, int position, int i) {
 	}
 }
 
+//brute force approach using a mixture of upper cases and 
+//lower cases to guess the password
 void brute_force_mix_alpha(BYTE **hashes, HASH_MODE hash_mode, 
 	char **found_words, int max_guesses) {
 	//adjust length of string based on the hash that we have 
@@ -368,6 +389,8 @@ void brute_force_mix_alpha(BYTE **hashes, HASH_MODE hash_mode,
 		guess = &guess_template6[0];
 		char6_loop = 0;
 	}
+	
+	//guess the passwords using a brute force on all alphabets
 	for(int i=0; i<NUM_UPPER_LOWER_ALPHA; i++) {
 		for(int j=0; j<NUM_UPPER_LOWER_ALPHA; j++) {
 			for(int k=0; k<NUM_UPPER_LOWER_ALPHA; k++) {
@@ -377,7 +400,8 @@ void brute_force_mix_alpha(BYTE **hashes, HASH_MODE hash_mode,
 							
 							//skip over parts that are all lower case
 							if(i>=NUM_ALPHA && j>=NUM_ALPHA &&
-								k>=NUM_ALPHA && p>=NUM_ALPHA) {
+								k>=NUM_ALPHA && p>=NUM_ALPHA &&
+								a>= NUM_ALPHA && b>=NUM_ALPHA) {
 								continue;
 							}
 							
@@ -403,8 +427,11 @@ void brute_force_mix_alpha(BYTE **hashes, HASH_MODE hash_mode,
 	}
 }
 
+//brute force through the numbers to guess the password
 void brute_force_numbers(BYTE **hashes, HASH_MODE hash_mode, 
 	char **found_words, int max_guesses) {
+	//adjust length of string based on the hash that we have 
+	//and number of hashes
 	char guess_template4[] = "    ";
 	char guess_template6[] = "      ";
 	char *guess;
@@ -416,6 +443,8 @@ void brute_force_numbers(BYTE **hashes, HASH_MODE hash_mode,
 		guess = &guess_template6[0];
 		char6_loop = 0;
 	}
+	
+	//guess the passwords using a brute force on all numbers
 	for(int i=0; i<NUM_DIGITS; i++) {
 		for(int j=0; j<NUM_DIGITS; j++) {
 			for(int k=0; k<NUM_DIGITS; k++) {
@@ -431,10 +460,8 @@ void brute_force_numbers(BYTE **hashes, HASH_MODE hash_mode,
 								guess[4] = '0' + a;
 								guess[5] = '0' + b;
 							}
-							if((check_guess(guess, hashes, found_words) > max_guesses) && (max_guesses >= 0)) {
-								printf("yay");
-								exit(EXIT_SUCCESS);
-							}
+							check_guess(guess, hashes, found_words, 
+								max_guesses);
 						}
 					}
 				}
@@ -443,7 +470,78 @@ void brute_force_numbers(BYTE **hashes, HASH_MODE hash_mode,
 	}
 }
 
+//transitions the character being changed from numerical to lower case
+void adjust_num_to_lower(char *guess, int position, int i) {
+	if (i<NUM_DIGITS) {
+		guess[position] = '0' + i;
+	} else {
+		guess[position] = '0' + i + ASCII_NUM_TO_LOWER;
+	}
+}
 
+//brute force through the all alphanumerical values to guess the password
+void brute_force_alphanumeric(BYTE **hashes, HASH_MODE hash_mode, 
+	char **found_words, int max_guesses) {
+	//adjust length of string based on the hash that we have 
+	//and number of hashes
+	char guess_template4[] = "    ";
+	char guess_template6[] = "      ";
+	char *guess;
+	int char6_loop;
+	if(hash_mode == HASH_4CHARS) {
+		guess = &guess_template4[0];
+		char6_loop = NUM_ALPHANUMERC-1;
+	} else {
+		guess = &guess_template6[0];
+		char6_loop = 0;
+	}
+	
+	//guess the passwords using a brute force on all alphanumericals
+	for(int i=0; i<NUM_ALPHANUMERC; i++) {
+		for(int j=0; j<NUM_ALPHANUMERC; j++) {
+			for(int k=0; k<NUM_ALPHANUMERC; k++) {
+				for(int p=0; p<NUM_ALPHANUMERC; p++) {
+					for(int a=char6_loop; a<NUM_ALPHANUMERC; a++) {
+						for(int b=char6_loop; b<NUM_ALPHANUMERC; b++) {
+							
+							//skip over parts that are all lower case
+							if(i>=NUM_ALPHA && j>=NUM_ALPHA &&
+								k>=NUM_ALPHA && p>=NUM_ALPHA &&
+								a>= NUM_ALPHA && b>= NUM_ALPHA) {
+								continue;
+							}
+							
+							//skip over parts that are all numbers
+							if(i<=NUM_DIGITS && j<=NUM_DIGITS &&
+								k<=NUM_DIGITS && p<=NUM_DIGITS &&
+								a<= NUM_DIGITS && b<= NUM_DIGITS) {
+								continue;
+							}
+							
+							//adds the character to the guess
+							adjust_num_to_lower(guess, 0, i);
+							adjust_num_to_lower(guess, 1, j);
+							adjust_num_to_lower(guess, 2, k);
+							adjust_num_to_lower(guess, 3, p);
+							if(hash_mode == HASH_6CHARS) {
+								adjust_num_to_lower(guess, 4, a);
+								adjust_num_to_lower(guess, 5, b);
+							}
+							
+							//checks if guess and its symbol variations 
+							//are correct
+							letter_to_sym_permutation(guess, 0, strlen(guess), 
+								hashes, 0, hash_mode, found_words, max_guesses);
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+//reads the file with all the hashed passwords and returns an array of
+//the hashed passwords, seperated by each word
 BYTE **read_hash_file(char *hash_file, int num_hashes) {
 	int i;
 	FILE *fileptr;
@@ -489,11 +587,12 @@ BYTE **read_hash_file(char *hash_file, int num_hashes) {
 }
 
 int main(int argc, char* argv[]) {
+	
+	//variations in actions depending on number of input
 	int max_guesses = -1;
 	if(argc == 2) {
 		max_guesses = atoi(argv[1]);
 	}
-	
 	if(argc == 3) {
 		compare_pass_to_hash(argv[1], argv[2]);
 		return 0;
@@ -513,21 +612,31 @@ int main(int argc, char* argv[]) {
 		found_words[i] = malloc((6+1) * sizeof(char));
 	}
 	
-	//makes guesses on hashed 4 character passwords
+	//makes guesses on hashed 4 and 6 character passwords using files
     guess_with_file("common_passwords.txt", char4_hashes, HASH_4CHARS, 
     	found_words, max_guesses);
-    guess_with_file("dict4words.txt",char4_hashes, HASH_4CHARS, found_words, max_guesses);
-    brute_force_lowercase_alpha(char4_hashes, HASH_4CHARS, found_words, max_guesses);
-    brute_force_numbers(char4_hashes, HASH_4CHARS, found_words, max_guesses);
-    brute_force_mix_alpha(char4_hashes, HASH_4CHARS, found_words, max_guesses);
-    
-    //makes guesses on hashed 6 character passwords
     guess_with_file("common_passwords.txt", char6_hashes, HASH_6CHARS, 
     	found_words, max_guesses);
-    guess_with_file("dict6words.txt",char6_hashes, HASH_6CHARS, found_words, max_guesses);
+    guess_with_file("dict4words.txt",char4_hashes, HASH_4CHARS, found_words, 
+    	max_guesses);
+    guess_with_file("dict6words.txt",char6_hashes, HASH_6CHARS, found_words, 
+    	max_guesses);
+    
+    //use brute force approaches to find 4 character passwords
+    brute_force_lowercase_alpha(char4_hashes, HASH_4CHARS, found_words,
+    	max_guesses);
+    brute_force_numbers(char4_hashes, HASH_4CHARS, found_words, max_guesses);
+    brute_force_mix_alpha(char4_hashes, HASH_4CHARS, found_words, max_guesses);
+    brute_force_alphanumeric(char4_hashes, HASH_4CHARS, found_words, 
+    	max_guesses);
+
+    //use brute force approaches to find 6 character passwords
     brute_force_numbers(char6_hashes, HASH_6CHARS, found_words, max_guesses);
-    brute_force_lowercase_alpha(char6_hashes, HASH_6CHARS, found_words, max_guesses);
+    brute_force_lowercase_alpha(char6_hashes, HASH_6CHARS, found_words, 
+    	max_guesses);
     brute_force_mix_alpha(char6_hashes, HASH_6CHARS, found_words, max_guesses);
+    brute_force_alphanumeric(char6_hashes, HASH_6CHARS, found_words, 
+    	max_guesses);
 	return 0;
 }
 
